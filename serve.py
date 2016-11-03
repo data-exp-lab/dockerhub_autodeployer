@@ -27,19 +27,27 @@ def _docker_callback(url, payload):
 class MyHandler(tornado.web.RequestHandler):
 
     def post(self):
-        env = dict(os.environ)
         logging.debug("payload = %s" % self.request.body)
-        data = json.loads(self.request.body.decode('utf8'))
+        try:
+            data = json.loads(self.request.body.decode('utf8'))
+        except ValueError:
+            self.send_error(
+                400, message='Request body is not a valid JSON')
+
         if set(('callback_url', 'repository')) <= set(data.keys()):
             self.send_error(
                 400, message='Request does not have required components')
+
+        image, tag = DOCKER_REPO.split(':')
+        if data['repository']['repo_name'] != image:
+            self.send_error(
+                400, message='Invalid repository')
 
         containers = DOCKER.containers(filters={'ancestor': DOCKER_REPO})
         for container in containers:
             DOCKER.stop(container['Id'], timeout=0)
             DOCKER.remove_container(container['Id'], force=True)
 
-        image, tag = DOCKER_REPO.split(':')
         DOCKER.pull(image, tag=tag)
 
         nginx = DOCKER.containers(filters={'ancestor': 'nginx'})
