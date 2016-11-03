@@ -50,7 +50,7 @@ class MyHandler(tornado.web.RequestHandler):
 
         DOCKER.pull(image, tag=tag)
 
-        temp = DOCKER.containers(filters={'ancestor': 'nginx'})[0]
+        temp = DOCKER.containers(filters={'ancestor': 'nginx'})
         if len(temp) != 1:
             self.send_error(
                 500, 'nginx container not found')
