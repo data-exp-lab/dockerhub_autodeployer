@@ -31,17 +31,15 @@ class MyHandler(tornado.web.RequestHandler):
         try:
             data = json.loads(self.request.body.decode('utf8'))
         except ValueError:
-            self.send_error(
-                400, message='Request body is not a valid JSON')
-
-        if set(('callback_url', 'repository')) <= set(data.keys()):
-            self.send_error(
-                400, message='Request does not have required components')
+            message = 'Request body is not a valid JSON'
+            logging.debug(message)
+            raise tornado.web.HTTPError(400, message=message)
 
         image, tag = DOCKER_REPO.split(':')
         if data['repository']['repo_name'] != image:
-            self.send_error(
-                400, message='Invalid repository')
+            message = 'Invalid repository'
+            logging.debug(message)
+            raise tornado.web.HTTPError(400, message=message)
 
         containers = DOCKER.containers(filters={'ancestor': DOCKER_REPO})
         for container in containers:
@@ -52,8 +50,9 @@ class MyHandler(tornado.web.RequestHandler):
 
         temp = DOCKER.containers(filters={'ancestor': 'nginx'})
         if len(temp) != 1:
-            self.send_error(
-                500, 'nginx container not found')
+            message = 'nginx container not found'
+            logging.debug(message)
+            raise tornado.web.HTTPError(500, message=message)
         nginx = temp[0]
         network = list(nginx['NetworkSettings']['Networks'].keys())[0]
 
@@ -70,8 +69,6 @@ class MyHandler(tornado.web.RequestHandler):
             DOCKER_REPO, detach=True, environment=env,
             networking_config=networking_config)
         DOCKER.start(cid)
-
-        self.finish()
 
 
 if __name__ == '__main__':
