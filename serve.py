@@ -41,13 +41,13 @@ class MyHandler(tornado.web.RequestHandler):
             logging.debug(message)
             raise tornado.web.HTTPError(400, message=message)
 
+        # get containers running current version of the image
         containers = DOCKER.containers(filters={'ancestor': DOCKER_REPO})
-        for container in containers:
-            DOCKER.stop(container['Id'], timeout=0)
-            DOCKER.remove_container(container['Id'], force=True)
 
+        # pull new version of the image
         DOCKER.pull(image, tag=tag)
 
+        # find the network that nginx is using
         temp = DOCKER.containers(filters={'ancestor': 'nginx'})
         if len(temp) != 1:
             message = 'nginx container not found'
@@ -56,6 +56,12 @@ class MyHandler(tornado.web.RequestHandler):
         nginx = temp[0]
         network = list(nginx['NetworkSettings']['Networks'].keys())[0]
 
+        # stop and remove previous instance if present
+        for container in containers:
+            DOCKER.stop(container['Id'], timeout=0)
+            DOCKER.remove_container(container['Id'], force=True)
+
+        # create a new container using fresh image
         env = {
             'VIRTUAL_HOST': os.environ.get('TARGET_HOST'),
             'LETSENCRYPT_HOST': os.environ.get('TARGET_HOST'),
@@ -68,6 +74,8 @@ class MyHandler(tornado.web.RequestHandler):
         cid = DOCKER.create_container(
             DOCKER_REPO, detach=True, environment=env,
             networking_config=networking_config)
+
+        # start the new container
         DOCKER.start(cid)
 
 
