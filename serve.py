@@ -4,7 +4,6 @@
 """Automatic Docker Image Deployment via Docker Hub Webhooks."""
 
 import json
-import os
 import sys
 import logging
 import requests
@@ -16,7 +15,6 @@ logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s',
                     level=logging.DEBUG,
                     stream=sys.stdout)
 DOCKER = docker.Client(base_url='unix://var/run/docker.sock')
-DOCKER_REPO = os.environ.get('DOCKER_REPO', 'foo:latest')
 
 
 def _docker_callback(url, payload):
@@ -35,49 +33,36 @@ class MyHandler(tornado.web.RequestHandler):
             logging.debug(message)
             raise tornado.web.HTTPError(400, message=message)
 
-        image, tag = DOCKER_REPO.split(':')
-        if data['repository']['repo_name'] != image:
-            message = 'Invalid repository'
-            logging.debug(message)
-            raise tornado.web.HTTPError(400, message=message)
+        image = data['repository']['repo_name']
+        tag = data['push_data']['tag']
+        fn_image = '{}:{}'.format(image, tag)
+        # TODO check if allowed
 
         # get containers running current version of the image
-        containers = DOCKER.containers(filters={'ancestor': DOCKER_REPO})
+        containers = DOCKER.containers(filters={'ancestor': fn_image})
 
-        # pull new version of the image
-        DOCKER.pull(image, tag=tag)
-
-        # find the network that nginx is using
-        temp = DOCKER.containers(filters={'ancestor': 'nginx'})
-        if len(temp) != 1:
-            message = 'nginx container not found'
-            logging.debug(message)
-            raise tornado.web.HTTPError(500, message=message)
-        nginx = temp[0]
-        network = list(nginx['NetworkSettings']['Networks'].keys())[0]
-
-        # stop and remove previous instance if present
         for container in containers:
-            DOCKER.stop(container['Id'], timeout=0)
-            DOCKER.remove_container(container['Id'], force=True)
+            cid = container['Id']
+            # pull new version of the image
+            DOCKER.pull(image, tag=tag)
 
-        # create a new container using fresh image
-        env = {
-            'VIRTUAL_HOST': os.environ.get('TARGET_HOST'),
-            'LETSENCRYPT_HOST': os.environ.get('TARGET_HOST'),
-            'VIRTUAL_NETWORK': network,
-            'LETSENCRYPT_EMAIL': os.environ.get('ADMIN_EMAIL')
-        }
-        networking_config = DOCKER.create_networking_config(
-            {network: DOCKER.create_endpoint_config()}
-        )
-        cid = DOCKER.create_container(
-            DOCKER_REPO, detach=True, environment=env,
-            networking_config=networking_config)
+            info = DOCKER.inspect_container(cid)
+            env = dict([tuple(_.split('=')) for _ in info['Config']['Env']])
 
-        # start the new container
-        DOCKER.start(cid)
+            # create a new container using fresh image
+            network = list(container['NetworkSettings']['Networks'].keys())[0]
+            networking_config = DOCKER.create_networking_config(
+                {network: DOCKER.create_endpoint_config()}
+            )
 
+            # stop and remove previous instance if present
+            DOCKER.stop(cid, timeout=0)
+            DOCKER.remove_container(cid, force=True)
+            cid = DOCKER.create_container(
+                fn_image, detach=True, environment=env,
+                networking_config=networking_config)
+            # start the new container
+            DOCKER.start(cid)
 
 if __name__ == '__main__':
     app = tornado.web.Application([
